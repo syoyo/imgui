@@ -1,10 +1,8 @@
-// ImGui SDL2 binding with NanoRTL
+// @todo { Mac and Windows }
+#include "X11SWWindow.h"
 
-#include <SDL.h>
-#include <SDL_syswm.h>
-
-#include <imgui.h>
 #include "imgui_impl_raytrace.h"
+#include <imgui.h>
 
 #include <cstdio>
 
@@ -12,9 +10,10 @@
 #include "nanort.h"
 
 // Data
-static double       g_Time = 0.0f;
-static bool         g_MousePressed[3] = { false, false, false };
-static float        g_MouseWheel = 0.0f;
+static b3gDefaultWindow *g_Window = NULL;
+static double g_Time = 0.0f;
+static bool g_MousePressed[3] = {false, false, false};
+static float g_MouseWheel = 0.0f;
 static std::vector<unsigned char> g_buffer;
 
 namespace {
@@ -33,10 +32,7 @@ union fi {
   unsigned int i;
 };
 
-inline unsigned int mask(int x)
-{
-  return (1U << x) - 1;
-}
+inline unsigned int mask(int x) { return (1U << x) - 1; }
 
 // from fmath.hpp
 /*
@@ -45,17 +41,15 @@ inline unsigned int mask(int x)
 */
 
 class PowGenerator {
-  enum {
-    N = 11
-  };
+  enum { N = 11 };
   float tbl0_[256];
   struct {
     float app;
     float rev;
   } tbl1_[1 << N];
+
 public:
-  PowGenerator(float y)
-  {
+  PowGenerator(float y) {
     for (int i = 0; i < 256; i++) {
       tbl0_[i] = ::powf(2, (i - 127) * y);
     }
@@ -70,8 +64,7 @@ public:
       tbl1_[i].rev = (float)((b - a) / (h - e) / (1 << 23));
     }
   }
-  float get(float x) const
-  {
+  float get(float x) const {
     fi fi;
     fi.f = x;
     int a = (fi.i >> 23) & mask(8);
@@ -84,7 +77,6 @@ public:
     return f;
   }
 };
-
 
 class Texture {
 
@@ -167,10 +159,7 @@ int inline fasterfloor(const float x) {
   return y;
 }
 
-inline float lerp(float x, float y, float t)
-{
-  return x + t * (y - x);
-}
+inline float lerp(float x, float y, float t) { return x + t * (y - x); }
 
 bool myisnan(float a) {
   volatile float d = a;
@@ -178,9 +167,8 @@ bool myisnan(float a) {
 }
 
 inline void FilterByteLerp(float *rgba, const unsigned char *image, int i00,
-                       int i10, int i01, int i11,
-                       float dx, float dy,
-                       int stride, const PowGenerator &p) {
+                           int i10, int i01, int i11, float dx, float dy,
+                           int stride, const PowGenerator &p) {
   float texel[4][4];
 
   const float inv = 1.0f / 255.0f;
@@ -195,7 +183,8 @@ inline void FilterByteLerp(float *rgba, const unsigned char *image, int i00,
     }
 
     for (int i = 0; i < 4; i++) {
-      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx), lerp(texel[2][i], texel[3][i], dx), dy);
+      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx),
+                     lerp(texel[2][i], texel[3][i], dx), dy);
     }
 
   } else {
@@ -209,22 +198,22 @@ inline void FilterByteLerp(float *rgba, const unsigned char *image, int i00,
 
     for (int i = 0; i < stride; i++) {
       rgba[i] = texel[0][i]; // NEAREST
-      //lerp(lerp(texel[0][i], texel[1][i], dx), lerp(texel[2][i], texel[3][i], dx), dy);
+      // lerp(lerp(texel[0][i], texel[1][i], dx), lerp(texel[2][i], texel[3][i],
+      // dx), dy);
     }
   }
 
   if (stride < 4) {
     for (int i = stride; i < 4; i++) {
-        rgba[i] = rgba[stride-1];
+      rgba[i] = rgba[stride - 1];
     }
-    //rgba[3] = 1.0;
+    // rgba[3] = 1.0;
   }
 }
 
 inline void FilterFloatLerp(float *rgba, const float *image, int i00, int i10,
-                        int i01, int i11,
-                        float dx, float dy,
-                        int stride, const PowGenerator &p) {
+                            int i01, int i11, float dx, float dy, int stride,
+                            const PowGenerator &p) {
   float texel[4][4];
 
   if (stride == 4) {
@@ -237,7 +226,8 @@ inline void FilterFloatLerp(float *rgba, const float *image, int i00, int i10,
     }
 
     for (int i = 0; i < 4; i++) {
-      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx), lerp(texel[2][i], texel[3][i], dx), dy);
+      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx),
+                     lerp(texel[2][i], texel[3][i], dx), dy);
     }
 
   } else {
@@ -250,7 +240,8 @@ inline void FilterFloatLerp(float *rgba, const float *image, int i00, int i10,
     }
 
     for (int i = 0; i < stride; i++) {
-      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx), lerp(texel[2][i], texel[3][i], dx), dy);
+      rgba[i] = lerp(lerp(texel[0][i], texel[1][i], dx),
+                     lerp(texel[2][i], texel[3][i], dx), dy);
     }
   }
 
@@ -309,105 +300,100 @@ void Texture::fetch(float *rgba, float u, float v) const {
   int i11 = stride * (y1 * m_width + x1);
 
   if (m_format == FORMAT_BYTE) {
-    FilterByteLerp(rgba, m_image, i00, i01, i10, i11, dx, dy,
-                stride, m_pow);
+    FilterByteLerp(rgba, m_image, i00, i01, i10, i11, dx, dy, stride, m_pow);
   } else if (m_format == FORMAT_FLOAT) {
-    FilterFloatLerp(rgba, reinterpret_cast<float *>(m_image), i00, i01, i10, i11, dx, dy,
-                stride, m_pow);
+    FilterFloatLerp(rgba, reinterpret_cast<float *>(m_image), i00, i01, i10,
+                    i11, dx, dy, stride, m_pow);
   } else { // unknown
   }
 }
 
-bool TraceAndShade(
-    float RGBA[4],
-    int px, int py,
-    int width, int height,
-    nanort::Ray& ray,
-    nanort::BVHAccel& accel,
-    const Texture& texture,
-    const std::vector<float>& vertices,
-    const std::vector<unsigned int>& faces,
-    const std::vector<float>& colors,
-    const std::vector<float>& texcoords,
-    int depth)
-{
+bool TraceAndShade(float RGBA[4], int px, int py, int width, int height,
+                   nanort::Ray &ray, nanort::BVHAccel &accel,
+                   const Texture &texture, const std::vector<float> &vertices,
+                   const std::vector<unsigned int> &faces,
+                   const std::vector<float> &colors,
+                   const std::vector<float> &texcoords, int depth) {
 
-    if (depth > 8) {
-        printf("???\n");
-        return false;
+  if (depth > 8) {
+    printf("???\n");
+    return false;
+  }
+
+  nanort::Intersection isect;
+  isect.t = 1.0e+30f;
+
+  bool hit = accel.Traverse(isect, &vertices.at(0), &faces.at(0), ray);
+  if (hit) {
+    float texcoord[3][2];
+    float vtxcol[3][4];
+    for (int fi = 0; fi < 3; fi++) {
+      texcoord[fi][0] = texcoords[2 * (3 * isect.faceID + fi) + 0];
+      texcoord[fi][1] = texcoords[2 * (3 * isect.faceID + fi) + 1];
+      vtxcol[fi][0] = colors[4 * (3 * isect.faceID + fi) + 0];
+      vtxcol[fi][1] = colors[4 * (3 * isect.faceID + fi) + 1];
+      vtxcol[fi][2] = colors[4 * (3 * isect.faceID + fi) + 2];
+      vtxcol[fi][3] = colors[4 * (3 * isect.faceID + fi) + 3];
     }
 
-    nanort::Intersection isect;
-    isect.t = 1.0e+30f;
+    float ts = (1.0f - isect.u - isect.v) * texcoord[0][0] +
+               isect.u * texcoord[1][0] + isect.v * texcoord[2][0];
+    float tt = (1.0f - isect.u - isect.v) * texcoord[0][1] +
+               isect.u * texcoord[1][1] + isect.v * texcoord[2][1];
+    float vr = (1.0f - isect.u - isect.v) * vtxcol[0][0] +
+               isect.u * vtxcol[1][0] + isect.v * vtxcol[2][0];
+    float vg = (1.0f - isect.u - isect.v) * vtxcol[0][1] +
+               isect.u * vtxcol[1][1] + isect.v * vtxcol[2][1];
+    float vb = (1.0f - isect.u - isect.v) * vtxcol[0][2] +
+               isect.u * vtxcol[1][2] + isect.v * vtxcol[2][2];
+    float va = (1.0f - isect.u - isect.v) * vtxcol[0][3] +
+               isect.u * vtxcol[1][3] + isect.v * vtxcol[2][3];
 
-    bool hit = accel.Traverse(isect, &vertices.at(0), &faces.at(0), ray);
-    if (hit) {
-        float texcoord[3][2];
-        float vtxcol[3][4];
-        for (int fi = 0; fi < 3; fi++) {
-            texcoord[fi][0] = texcoords[2 * (3 * isect.faceID + fi) + 0];
-            texcoord[fi][1] = texcoords[2 * (3 * isect.faceID + fi) + 1];
-            vtxcol[fi][0] = colors[4 * (3 * isect.faceID + fi) + 0];
-            vtxcol[fi][1] = colors[4 * (3 * isect.faceID + fi) + 1];
-            vtxcol[fi][2] = colors[4 * (3 * isect.faceID + fi) + 2];
-            vtxcol[fi][3] = colors[4 * (3 * isect.faceID + fi) + 3];
-        }
+    float texRGBA[4];
+    texture.fetch(texRGBA, ts, tt);
 
-        float ts = (1.0f - isect.u - isect.v) * texcoord[0][0] + isect.u * texcoord[1][0] + isect.v * texcoord[2][0];
-        float tt = (1.0f - isect.u - isect.v) * texcoord[0][1] + isect.u * texcoord[1][1] + isect.v * texcoord[2][1];
-        float vr = (1.0f - isect.u - isect.v) * vtxcol[0][0] + isect.u * vtxcol[1][0] + isect.v * vtxcol[2][0];
-        float vg = (1.0f - isect.u - isect.v) * vtxcol[0][1] + isect.u * vtxcol[1][1] + isect.v * vtxcol[2][1];
-        float vb = (1.0f - isect.u - isect.v) * vtxcol[0][2] + isect.u * vtxcol[1][2] + isect.v * vtxcol[2][2];
-        float va = (1.0f - isect.u - isect.v) * vtxcol[0][3] + isect.u * vtxcol[1][3] + isect.v * vtxcol[2][3];
+    va *= texRGBA[3];
 
-        float texRGBA[4];
-        texture.fetch(texRGBA, ts,  tt);
+    if (texRGBA[3] < (1.0f - 1.0e-5f)) {
+      // Shoot transparent rays.
+      nanort::Ray transRay;
+      transRay.org[0] = ray.org[0] + isect.t * ray.dir[0];
+      transRay.org[1] = ray.org[1] + isect.t * ray.dir[1];
+      transRay.org[2] = ray.org[2] + isect.t * ray.dir[2];
 
-        va *= texRGBA[3];
+      transRay.dir[0] = ray.dir[0];
+      transRay.dir[1] = ray.dir[1];
+      transRay.dir[2] = ray.dir[2];
 
-        if (texRGBA[3] < (1.0f-1.0e-5f)) {
-            // Shoot transparent rays.
-            nanort::Ray transRay;
-            transRay.org[0] = ray.org[0] + isect.t * ray.dir[0];
-            transRay.org[1] = ray.org[1] + isect.t * ray.dir[1];
-            transRay.org[2] = ray.org[2] + isect.t * ray.dir[2];
+      transRay.org[0] += 0.01 * transRay.dir[0];
+      transRay.org[1] += 0.01 * transRay.dir[1];
+      transRay.org[2] += 0.01 * transRay.dir[2];
 
-            transRay.dir[0] = ray.dir[0];
-            transRay.dir[1] = ray.dir[1];
-            transRay.dir[2] = ray.dir[2];
-
-            transRay.org[0] += 0.01 * transRay.dir[0];
-            transRay.org[1] += 0.01 * transRay.dir[1];
-            transRay.org[2] += 0.01 * transRay.dir[2];
-
-            float transRGBA[4];
-            bool transHit = TraceAndShade(
-                transRGBA,
-                px, py, width, height,
-                transRay,
-                accel,
-                texture, vertices, faces, colors, texcoords, depth+1);
-            if (transHit) {
-                // @fixme {}
-                RGBA[0] = transRGBA[0];
-                RGBA[1] = transRGBA[1];
-                RGBA[2] = transRGBA[2];
-                RGBA[3] = transRGBA[3];
-            } else {
-                RGBA[0] = texRGBA[0] * vr;
-                RGBA[1] = texRGBA[1] * vg;
-                RGBA[2] = texRGBA[2] * vb;
-                RGBA[3] = va;
-            }
-        } else {
-            RGBA[0] = texRGBA[0] * vr;
-            RGBA[1] = texRGBA[1] * vg;
-            RGBA[2] = texRGBA[2] * vb;
-            RGBA[3] = va;
-        }
+      float transRGBA[4];
+      bool transHit =
+          TraceAndShade(transRGBA, px, py, width, height, transRay, accel,
+                        texture, vertices, faces, colors, texcoords, depth + 1);
+      if (transHit) {
+        // @fixme {}
+        RGBA[0] = transRGBA[0];
+        RGBA[1] = transRGBA[1];
+        RGBA[2] = transRGBA[2];
+        RGBA[3] = transRGBA[3];
+      } else {
+        RGBA[0] = texRGBA[0] * vr;
+        RGBA[1] = texRGBA[1] * vg;
+        RGBA[2] = texRGBA[2] * vb;
+        RGBA[3] = va;
+      }
+    } else {
+      RGBA[0] = texRGBA[0] * vr;
+      RGBA[1] = texRGBA[1] * vg;
+      RGBA[2] = texRGBA[2] * vb;
+      RGBA[3] = va;
     }
+  }
 
-    return hit;
+  return hit;
 }
 
 } // namespace
@@ -415,194 +401,195 @@ bool TraceAndShade(
 static Texture g_FontTexture;
 std::vector<unsigned char> g_TextureMem;
 
+void ImGui_ImplRt_RenderDrawLists(ImDrawData *draw_data) {
+  const float width = ImGui::GetIO().DisplaySize.x;
+  const float height = ImGui::GetIO().DisplaySize.y;
 
-void ImGui_ImplRt_RenderDrawLists(ImDrawData* draw_data)
-{
-    const float width = ImGui::GetIO().DisplaySize.x;
-    const float height = ImGui::GetIO().DisplaySize.y;
+  g_buffer.resize(width * height * 4);
+  for (int i = 0; i < width * height; i++) {
+    g_buffer[4 * i + 0] = 0.0f;
+    g_buffer[4 * i + 1] = 0.0f;
+    g_buffer[4 * i + 2] = 0.0f;
+    g_buffer[4 * i + 3] = 1.0f;
+  }
 
-    g_buffer.resize(width * height * 4);
-    for (int i = 0; i < width * height; i++) {
-        g_buffer[4 * i + 0] = 0.0f;
-        g_buffer[4 * i + 1] = 0.0f;
-        g_buffer[4 * i + 2] = 0.0f;
-        g_buffer[4 * i + 3] = 1.0f;
-    }
+  int maxLayers = 0;
 
-    int maxLayers = 0;
+// Render command lists
+#define OFFSETOF(TYPE, ELEMENT) ((size_t) & (((TYPE *)0)->ELEMENT))
+  for (int n = 0; n < draw_data->CmdListsCount; n++) {
 
-    // Render command lists
-    #define OFFSETOF(TYPE, ELEMENT) ((size_t)&(((TYPE *)0)->ELEMENT))
-    for (int n = 0; n < draw_data->CmdListsCount; n++)
-    {
+    const ImDrawList *cmd_list = draw_data->CmdLists[n];
+    const unsigned char *vtx_buffer =
+        (const unsigned char *)&cmd_list->VtxBuffer.front();
+    const ImDrawIdx *idx_buffer = &cmd_list->IdxBuffer.front();
 
-        const ImDrawList* cmd_list = draw_data->CmdLists[n];
-        const unsigned char* vtx_buffer = (const unsigned char*)&cmd_list->VtxBuffer.front();
-        const ImDrawIdx* idx_buffer = &cmd_list->IdxBuffer.front();
-        
-        int numVtx = cmd_list->VtxBuffer.size();
-        int numIdx = cmd_list->IdxBuffer.size();
+    int numVtx = cmd_list->VtxBuffer.size();
+    int numIdx = cmd_list->IdxBuffer.size();
 
-        int index_offset = 0;
-        for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.size(); cmd_i++)
-        {
-            std::vector<float>          vertices;  // XYZ
-            std::vector<unsigned int>   faces;     // 3 * numFaces(triangle)
-            std::vector<float>          texcoords; // facevarying(2 * 3 * numFaces)
-            std::vector<float>          colors;    // facevarying(4 * 3 * numFaces)
+    int index_offset = 0;
+    for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.size(); cmd_i++) {
+      std::vector<float> vertices;     // XYZ
+      std::vector<unsigned int> faces; // 3 * numFaces(triangle)
+      std::vector<float> texcoords;    // facevarying(2 * 3 * numFaces)
+      std::vector<float> colors;       // facevarying(4 * 3 * numFaces)
 
-            const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
+      const ImDrawCmd *pcmd = &cmd_list->CmdBuffer[cmd_i];
 
-            int numElems = (int)pcmd->ElemCount;
+      int numElems = (int)pcmd->ElemCount;
 
-            if (pcmd->UserCallback)
-            {
-                pcmd->UserCallback(cmd_list, pcmd);
-            }
-            else
-            {
+      if (pcmd->UserCallback) {
+        pcmd->UserCallback(cmd_list, pcmd);
+      } else {
 
-                int faceCount = 0;
-                float maxDepth = numElems / 3.0;
-                for (int i = 0; i < numElems; i += 3) {
-                    unsigned int idx0 = cmd_list->IdxBuffer[index_offset+i+0];
-                    unsigned int idx1 = cmd_list->IdxBuffer[index_offset+i+1];
-                    unsigned int idx2 = cmd_list->IdxBuffer[index_offset+i+2];
+        int faceCount = 0;
+        float maxDepth = numElems / 3.0;
+        for (int i = 0; i < numElems; i += 3) {
+          unsigned int idx0 = cmd_list->IdxBuffer[index_offset + i + 0];
+          unsigned int idx1 = cmd_list->IdxBuffer[index_offset + i + 1];
+          unsigned int idx2 = cmd_list->IdxBuffer[index_offset + i + 2];
 
-                    // Create facevarying attributes
-                    float x0 = cmd_list->VtxBuffer[idx0].pos.x;
-                    float y0 = cmd_list->VtxBuffer[idx0].pos.y;
-                    float x1 = cmd_list->VtxBuffer[idx1].pos.x;
-                    float y1 = cmd_list->VtxBuffer[idx1].pos.y;
-                    float x2 = cmd_list->VtxBuffer[idx2].pos.x;
-                    float y2 = cmd_list->VtxBuffer[idx2].pos.y;
+          // Create facevarying attributes
+          float x0 = cmd_list->VtxBuffer[idx0].pos.x;
+          float y0 = cmd_list->VtxBuffer[idx0].pos.y;
+          float x1 = cmd_list->VtxBuffer[idx1].pos.x;
+          float y1 = cmd_list->VtxBuffer[idx1].pos.y;
+          float x2 = cmd_list->VtxBuffer[idx2].pos.x;
+          float y2 = cmd_list->VtxBuffer[idx2].pos.y;
 
-                    const ImDrawVert& v0 = cmd_list->VtxBuffer[idx0];
-                    const ImDrawVert& v1 = cmd_list->VtxBuffer[idx1];
-                    const ImDrawVert& v2 = cmd_list->VtxBuffer[idx2];
+          const ImDrawVert &v0 = cmd_list->VtxBuffer[idx0];
+          const ImDrawVert &v1 = cmd_list->VtxBuffer[idx1];
+          const ImDrawVert &v2 = cmd_list->VtxBuffer[idx2];
 
-                    // Adoid co-planar triangle by adding z-value.
-                    // Assume primitives are sorted in back-to-front
-                    vertices.push_back(x0);
-                    vertices.push_back(y0);
-                    vertices.push_back(i/3.0);
-                    vertices.push_back(x1);
-                    vertices.push_back(y1);
-                    vertices.push_back(i/3.0);
-                    vertices.push_back(x2);
-                    vertices.push_back(y2);
-                    vertices.push_back(i/3.0);
+          // Adoid co-planar triangle by adding z-value.
+          // Assume primitives are sorted in back-to-front
+          vertices.push_back(x0);
+          vertices.push_back(y0);
+          vertices.push_back(i / 3.0);
+          vertices.push_back(x1);
+          vertices.push_back(y1);
+          vertices.push_back(i / 3.0);
+          vertices.push_back(x2);
+          vertices.push_back(y2);
+          vertices.push_back(i / 3.0);
 
-                    texcoords.push_back(v0.uv.x);
-                    texcoords.push_back(v0.uv.y);
-                    texcoords.push_back(v1.uv.x);
-                    texcoords.push_back(v1.uv.y);
-                    texcoords.push_back(v2.uv.x);
-                    texcoords.push_back(v2.uv.y);
+          texcoords.push_back(v0.uv.x);
+          texcoords.push_back(v0.uv.y);
+          texcoords.push_back(v1.uv.x);
+          texcoords.push_back(v1.uv.y);
+          texcoords.push_back(v2.uv.x);
+          texcoords.push_back(v2.uv.y);
 
-                    ImVec4 rgba0 = ImGui::ColorConvertU32ToFloat4(v0.col);
-                    ImVec4 rgba1 = ImGui::ColorConvertU32ToFloat4(v1.col);
-                    ImVec4 rgba2 = ImGui::ColorConvertU32ToFloat4(v2.col);
+          ImVec4 rgba0 = ImGui::ColorConvertU32ToFloat4(v0.col);
+          ImVec4 rgba1 = ImGui::ColorConvertU32ToFloat4(v1.col);
+          ImVec4 rgba2 = ImGui::ColorConvertU32ToFloat4(v2.col);
 
-                    colors.push_back(rgba0.x);
-                    colors.push_back(rgba0.y);
-                    colors.push_back(rgba0.z);
-                    colors.push_back(rgba0.w);
-                    colors.push_back(rgba1.x);
-                    colors.push_back(rgba1.y);
-                    colors.push_back(rgba1.z);
-                    colors.push_back(rgba1.w);
-                    colors.push_back(rgba2.x);
-                    colors.push_back(rgba2.y);
-                    colors.push_back(rgba2.z);
-                    colors.push_back(rgba2.w);
+          colors.push_back(rgba0.x);
+          colors.push_back(rgba0.y);
+          colors.push_back(rgba0.z);
+          colors.push_back(rgba0.w);
+          colors.push_back(rgba1.x);
+          colors.push_back(rgba1.y);
+          colors.push_back(rgba1.z);
+          colors.push_back(rgba1.w);
+          colors.push_back(rgba2.x);
+          colors.push_back(rgba2.y);
+          colors.push_back(rgba2.z);
+          colors.push_back(rgba2.w);
 
-                    faces.push_back(3 * faceCount + 0);
-                    faces.push_back(3 * faceCount + 1);
-                    faces.push_back(3 * faceCount + 2);
-                    faceCount++;
-                }
-
-                nanort::BVHBuildOptions options;
-                nanort::BVHAccel accel;
-                bool ret = accel.Build(&vertices.at(0), &faces.at(0), faces.size() / 3, options);
-                assert(ret);
-
-                nanort::BVHBuildStatistics stats = accel.GetStatistics();
-
-                //printf("  BVH statistics:\n");
-                //printf("    # of leaf   nodes: %d\n", stats.numLeafNodes);
-                //printf("    # of branch nodes: %d\n", stats.numBranchNodes);
-                //printf("  Max tree depth     : %d\n", stats.maxTreeDepth);
-                //printf("  Scene eps          : %f\n", stats.epsScale);
-                //float bmin[3], bmax[3];
-                //accel.BoundingBox(bmin, bmax);
-                //printf("  Bmin               : %f, %f, %f\n", bmin[0], bmin[1], bmin[2]);
-                //printf("  Bmax               : %f, %f, %f\n", bmax[0], bmax[1], bmax[2]);
-
-                float tFar = 1.0e+30f;
-
-                // Shoot rays.
-                #ifdef _OPENMP
-                #pragma omp parallel for
-                #endif
-                for (int y = 0; y < height; y++) {
-                  for (int x = 0; x < width; x++) {
-                    nanort::Intersection isect;
-                    isect.t = tFar;
-
-                    nanort::Ray ray;
-                    ray.org[0] = x+0.5f;
-                    ray.org[1] = y+0.5f;
-                    ray.org[2] = maxDepth + 1.0f;
-
-                    nanort::float3 dir;
-                    dir[0] = 0.0f;
-                    dir[1] = 0.0f;
-                    dir[2] = -1.0f;
-
-                    ray.dir[0] = dir[0];
-                    ray.dir[1] = dir[1];
-                    ray.dir[2] = dir[2];
-
-                    float RGBA[4];
-                    bool hit = TraceAndShade(RGBA, x, y, width, height, ray, accel,
-                                g_FontTexture, vertices, faces, colors, texcoords, 0);
-
-                    if (hit) {
-                        // Mimics glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                        float sfactor = RGBA[3];
-                        float dfactor = 1.0f - RGBA[3];
-                        g_buffer[4*(y*width+x)+0] = fclamp(RGBA[0] * sfactor + dfactor*g_buffer[4*(y*width+x)+0]/255.5f);
-                        g_buffer[4*(y*width+x)+1] = fclamp(RGBA[1] * sfactor + dfactor*g_buffer[4*(y*width+x)+1]/255.5f);
-                        g_buffer[4*(y*width+x)+2] = fclamp(RGBA[2] * sfactor + dfactor*g_buffer[4*(y*width+x)+2]/255.5f);
-                        g_buffer[4*(y*width+x)+3] = fclamp(RGBA[3] * sfactor + dfactor*g_buffer[4*(y*width+x)+3]/255.5f);
-                    }
-                  }
-                }
-
-            }
-
-            idx_buffer += pcmd->ElemCount;
-            index_offset += pcmd->ElemCount;
+          faces.push_back(3 * faceCount + 0);
+          faces.push_back(3 * faceCount + 1);
+          faces.push_back(3 * faceCount + 2);
+          faceCount++;
         }
 
+        nanort::BVHBuildOptions options;
+        nanort::BVHAccel accel;
+        bool ret = accel.Build(&vertices.at(0), &faces.at(0), faces.size() / 3,
+                               options);
+        assert(ret);
 
+        nanort::BVHBuildStatistics stats = accel.GetStatistics();
+
+        // printf("  BVH statistics:\n");
+        // printf("    # of leaf   nodes: %d\n", stats.numLeafNodes);
+        // printf("    # of branch nodes: %d\n", stats.numBranchNodes);
+        // printf("  Max tree depth     : %d\n", stats.maxTreeDepth);
+        // printf("  Scene eps          : %f\n", stats.epsScale);
+        // float bmin[3], bmax[3];
+        // accel.BoundingBox(bmin, bmax);
+        // printf("  Bmin               : %f, %f, %f\n", bmin[0], bmin[1],
+        // bmin[2]);
+        // printf("  Bmax               : %f, %f, %f\n", bmax[0], bmax[1],
+        // bmax[2]);
+
+        float tFar = 1.0e+30f;
+
+// Shoot rays.
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int y = 0; y < height; y++) {
+          for (int x = 0; x < width; x++) {
+            nanort::Intersection isect;
+            isect.t = tFar;
+
+            nanort::Ray ray;
+            ray.org[0] = x + 0.5f;
+            ray.org[1] = y + 0.5f;
+            ray.org[2] = maxDepth + 1.0f;
+
+            nanort::float3 dir;
+            dir[0] = 0.0f;
+            dir[1] = 0.0f;
+            dir[2] = -1.0f;
+
+            ray.dir[0] = dir[0];
+            ray.dir[1] = dir[1];
+            ray.dir[2] = dir[2];
+
+            float RGBA[4];
+            bool hit = TraceAndShade(RGBA, x, y, width, height, ray, accel,
+                                     g_FontTexture, vertices, faces, colors,
+                                     texcoords, 0);
+
+            if (hit) {
+              // Mimics glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+              float sfactor = RGBA[3];
+              float dfactor = 1.0f - RGBA[3];
+              g_buffer[4 * (y * width + x) + 0] =
+                  fclamp(RGBA[0] * sfactor +
+                         dfactor * g_buffer[4 * (y * width + x) + 0] / 255.5f);
+              g_buffer[4 * (y * width + x) + 1] =
+                  fclamp(RGBA[1] * sfactor +
+                         dfactor * g_buffer[4 * (y * width + x) + 1] / 255.5f);
+              g_buffer[4 * (y * width + x) + 2] =
+                  fclamp(RGBA[2] * sfactor +
+                         dfactor * g_buffer[4 * (y * width + x) + 2] / 255.5f);
+              g_buffer[4 * (y * width + x) + 3] =
+                  fclamp(RGBA[3] * sfactor +
+                         dfactor * g_buffer[4 * (y * width + x) + 3] / 255.5f);
+            }
+          }
+        }
+      }
+
+      idx_buffer += pcmd->ElemCount;
+      index_offset += pcmd->ElemCount;
     }
-    #undef OFFSETOF
-
+  }
+#undef OFFSETOF
 }
 
-static const char* ImGui_ImplRt_GetClipboardText()
-{
-	return SDL_GetClipboardText();
+static const char *ImGui_ImplRt_GetClipboardText() {
+  return NULL; // SDL_GetClipboardText();
 }
 
-static void ImGui_ImplRt_SetClipboardText(const char* text)
-{
-    SDL_SetClipboardText(text);
+static void ImGui_ImplRt_SetClipboardText(const char *text) {
+  return; // SDL_SetClipboardText(text);
 }
 
+#if 0
 bool ImGui_ImplRt_ProcessEvent(SDL_Event* event)
 {
     ImGuiIO& io = ImGui::GetIO();
@@ -653,128 +640,117 @@ bool ImGui_ImplRt_ProcessEvent(SDL_Event* event)
     }
     return false;
 }
-
-bool ImGui_ImplRt_CreateDeviceObjects()
-{
-    ImGuiIO& io = ImGui::GetIO();
-
-    // Build texture
-    unsigned char* pixels;
-    int width, height;
-    io.Fonts->GetTexDataAsAlpha8(&pixels, &width, &height);
-
-    g_TextureMem.resize(width * height);
-    std::copy(pixels, pixels+width*height, g_TextureMem.begin());
-    g_FontTexture.Set(&g_TextureMem.at(0), width, height, 1, Texture::FORMAT_BYTE, 1.0f);
-
-    // Cleanup (don't clear the input data if you want to append new fonts later)
-	io.Fonts->ClearInputData();
-	io.Fonts->ClearTexData();
-
-    return true;
-}
-
-void    ImGui_ImplRt_InvalidateDeviceObjects()
-{
-    //if (g_FontTexture)
-    //{
-    //    //glDeleteTextures(1, &g_FontTexture);
-    //    ImGui::GetIO().Fonts->TexID = 0;
-    //    g_FontTexture = 0;
-    //}
-}
-
-bool    ImGui_ImplRt_Init(SDL_Window* window)
-{
-    ImGuiIO& io = ImGui::GetIO();
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 0.0f;
-    style.AntiAliasedLines = false;
-    style.AntiAliasedShapes = false;
-    io.KeyMap[ImGuiKey_Tab] = SDLK_TAB;                     // Keyboard mapping. ImGui will use those indices to peek into the io.KeyDown[] array.
-    io.KeyMap[ImGuiKey_LeftArrow] = SDL_SCANCODE_LEFT;
-    io.KeyMap[ImGuiKey_RightArrow] = SDL_SCANCODE_RIGHT;
-    io.KeyMap[ImGuiKey_UpArrow] = SDL_SCANCODE_UP;
-    io.KeyMap[ImGuiKey_DownArrow] = SDL_SCANCODE_DOWN;
-    io.KeyMap[ImGuiKey_PageUp] = SDL_SCANCODE_PAGEUP;
-    io.KeyMap[ImGuiKey_PageDown] = SDL_SCANCODE_PAGEDOWN;
-    io.KeyMap[ImGuiKey_Home] = SDL_SCANCODE_HOME;
-    io.KeyMap[ImGuiKey_End] = SDL_SCANCODE_END;
-    io.KeyMap[ImGuiKey_Delete] = SDLK_DELETE;
-    io.KeyMap[ImGuiKey_Backspace] = SDLK_BACKSPACE;
-    io.KeyMap[ImGuiKey_Enter] = SDLK_RETURN;
-    io.KeyMap[ImGuiKey_Escape] = SDLK_ESCAPE;
-    io.KeyMap[ImGuiKey_A] = SDLK_a;
-    io.KeyMap[ImGuiKey_C] = SDLK_c;
-    io.KeyMap[ImGuiKey_V] = SDLK_v;
-    io.KeyMap[ImGuiKey_X] = SDLK_x;
-    io.KeyMap[ImGuiKey_Y] = SDLK_y;
-    io.KeyMap[ImGuiKey_Z] = SDLK_z;
-	
-    io.SetClipboardTextFn = ImGui_ImplRt_SetClipboardText;
-    io.GetClipboardTextFn = ImGui_ImplRt_GetClipboardText;
-	
-#ifdef _WIN32
-	SDL_SysWMinfo wmInfo;
-	SDL_VERSION(&wmInfo.version);
-	SDL_GetWindowWMInfo(window, &wmInfo);
-    io.ImeWindowHandle = wmInfo.info.win.window;
 #endif
-    io.RenderDrawListsFn = ImGui_ImplRt_RenderDrawLists;   // Alternatively you can set this to NULL and call ImGui::GetDrawData() after ImGui::Render() to get the same ImDrawData pointer.
 
-    return true;
+bool ImGui_ImplRt_CreateDeviceObjects() {
+  ImGuiIO &io = ImGui::GetIO();
+
+  // Build texture
+  unsigned char *pixels;
+  int width, height;
+  io.Fonts->GetTexDataAsAlpha8(&pixels, &width, &height);
+
+  g_TextureMem.resize(width * height);
+  std::copy(pixels, pixels + width * height, g_TextureMem.begin());
+  g_FontTexture.Set(&g_TextureMem.at(0), width, height, 1, Texture::FORMAT_BYTE,
+                    1.0f);
+
+  // Cleanup (don't clear the input data if you want to append new fonts later)
+  io.Fonts->ClearInputData();
+  io.Fonts->ClearTexData();
+
+  return true;
 }
 
-void ImGui_ImplRt_Shutdown()
-{
-    ImGui_ImplRt_InvalidateDeviceObjects();
-    ImGui::Shutdown();
+void ImGui_ImplRt_InvalidateDeviceObjects() {
+  // if (g_FontTexture)
+  //{
+  //    //glDeleteTextures(1, &g_FontTexture);
+  //    ImGui::GetIO().Fonts->TexID = 0;
+  //    g_FontTexture = 0;
+  //}
 }
 
-void ImGui_ImplRt_NewFrame(SDL_Window* window)
-{
-    if (!g_FontTexture.IsValid())
-        ImGui_ImplRt_CreateDeviceObjects();
+bool ImGui_ImplRt_Init(b3gDefaultWindow *window) {
+  g_Window = window;
 
-    ImGuiIO& io = ImGui::GetIO();
+  ImGuiIO &io = ImGui::GetIO();
 
-    // Setup display size (every frame to accommodate for window resizing)
-    int w, h;
-	SDL_GetWindowSize(window, &w, &h);
-    g_buffer.resize(w * h * 3);
-    io.DisplaySize = ImVec2((float)w, (float)h);
+  io.KeyMap[ImGuiKey_Tab] = ImGuiKey_Tab;
+  io.KeyMap[ImGuiKey_LeftArrow] = ImGuiKey_LeftArrow;
+  io.KeyMap[ImGuiKey_RightArrow] = ImGuiKey_RightArrow;
+  io.KeyMap[ImGuiKey_UpArrow] = ImGuiKey_UpArrow;
+  io.KeyMap[ImGuiKey_DownArrow] = ImGuiKey_DownArrow;
+  io.KeyMap[ImGuiKey_PageUp] = ImGuiKey_PageUp;
+  io.KeyMap[ImGuiKey_PageDown] = ImGuiKey_PageDown;
+  io.KeyMap[ImGuiKey_Home] = ImGuiKey_Home;
+  io.KeyMap[ImGuiKey_End] = ImGuiKey_End;
+  io.KeyMap[ImGuiKey_Delete] = ImGuiKey_Delete;
+  io.KeyMap[ImGuiKey_Backspace] = ImGuiKey_Backspace;
+  io.KeyMap[ImGuiKey_Enter] = ImGuiKey_Enter;
+  io.KeyMap[ImGuiKey_Escape] = ImGuiKey_Escape;
 
-    // Setup time step
-	Uint32	time = SDL_GetTicks();
-	double current_time = time / 1000.0;
-    io.DeltaTime = g_Time > 0.0 ? (float)(current_time - g_Time) : (float)(1.0f/60.0f);
-    g_Time = current_time;
+  io.RenderDrawListsFn =
+      ImGui_ImplRt_RenderDrawLists; // Alternatively you can set this to
+                                    // NULL and call ImGui::GetDrawData()
+                                    // after ImGui::Render() to get the same
+                                    // ImDrawData pointer.
+  io.SetClipboardTextFn = ImGui_ImplRt_SetClipboardText;
+  io.GetClipboardTextFn = ImGui_ImplRt_GetClipboardText;
 
-    // Setup inputs
-    // (we already got mouse wheel, keyboard keys & characters from glfw callbacks polled in glfwPollEvents())
-    int mx, my;
-    Uint32 mouseMask = SDL_GetMouseState(&mx, &my);
-    if (SDL_GetWindowFlags(window) & SDL_WINDOW_MOUSE_FOCUS)
-    	io.MousePos = ImVec2((float)mx, (float)my);   // Mouse position, in pixels (set to -1,-1 if no mouse / on another screen, etc.)
-    else
-    	io.MousePos = ImVec2(-1,-1);
-   
-	io.MouseDown[0] = g_MousePressed[0] || (mouseMask & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;		// If a mouse press event came, always pass it as "mouse held this frame", so we don't miss click-release events that are shorter than 1 frame.
-	io.MouseDown[1] = g_MousePressed[1] || (mouseMask & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
-	io.MouseDown[2] = g_MousePressed[2] || (mouseMask & SDL_BUTTON(SDL_BUTTON_MIDDLE)) != 0;
-    g_MousePressed[0] = g_MousePressed[1] = g_MousePressed[2] = false;
-
-    io.MouseWheel = g_MouseWheel;
-    g_MouseWheel = 0.0f;
-
-    // Hide OS mouse cursor if ImGui is drawing it
-    SDL_ShowCursor(io.MouseDrawCursor ? 0 : 1);
-
-    // Start the frame
-    ImGui::NewFrame();
+  return true;
 }
 
-void ImGui_ImplRt_GetImage(unsigned char* dst_image)
-{
-    memcpy(dst_image, &g_buffer.at(0), g_buffer.size());
+void ImGui_ImplRt_Shutdown() {
+  ImGui_ImplRt_InvalidateDeviceObjects();
+  ImGui::Shutdown();
+}
+
+void ImGui_ImplRt_NewFrame(int mouse_x, int mouse_y) {
+  if (!g_FontTexture.IsValid())
+    ImGui_ImplRt_CreateDeviceObjects();
+
+  ImGuiIO &io = ImGui::GetIO();
+
+  // Setup display size (every frame to accommodate for window resizing)
+  int w, h;
+  int display_w, display_h;
+  assert(g_Window);
+  // glfwGetWindowSize(g_Window, &w, &h);
+  // glfwGetFramebufferSize(g_Window, &display_w, &display_h);
+  w = g_Window->getWidth();
+  h = g_Window->getHeight();
+  display_w = g_Window->getWidth(); // @todo { support retina scale. }
+  display_h = g_Window->getHeight();
+  assert(display_w > 0);
+  assert(display_h > 0);
+  io.DisplaySize = ImVec2((float)w, (float)h);
+  io.DisplayFramebufferScale = ImVec2(w > 0 ? ((float)display_w / w) : 0,
+                                      h > 0 ? ((float)display_h / h) : 0);
+
+  // Setup time step
+  // double current_time =  glfwGetTime();
+  io.DeltaTime = (float)(1.0f / 60.0f);
+  // g_Time = current_time;
+
+  io.MousePos = ImVec2((float)mouse_x,
+                       (float)mouse_y); // Mouse position in screen
+                                        // coordinates (set to -1,-1 if no
+                                        // mouse / on another screen, etc.)
+
+  // @todo
+  for (int i = 0; i < 3; i++) {
+    io.MouseDown[i] = g_MousePressed[i];
+    // g_MousePressed[i] = false;
+  }
+
+  io.MouseWheel = g_MouseWheel;
+  g_MouseWheel = 0.0f;
+
+  // Start the frame
+  ImGui::NewFrame();
+}
+
+void ImGui_ImplRt_GetImage(unsigned char *dst_image) {
+  memcpy(dst_image, &g_buffer.at(0), g_buffer.size());
 }

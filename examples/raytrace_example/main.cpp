@@ -1,52 +1,68 @@
-// ImGui - standalone example application for SDL2 + NanoRT
+// Must be included befor `imgui_impl_raytrace.h`
+#include "X11SWWindow.h"
 
-#include <imgui.h>
 #include "imgui_impl_raytrace.h"
-#include <vector>
+#include <imgui.h>
 #include <stdio.h>
-#include <SDL.h>
+#include <vector>
 
-inline unsigned char iclamp(int x)
-{
-    if (x > 255) x = 255;
-    if (x < 0) x = 0;
-    return (unsigned char)x;
+#include <atomic>
+#include <thread>
+
+int gWidth = 512;
+int gHeight = 512;
+int gMousePosX = -1, gMousePosY = -1;
+bool gMouseLeftDown = false;
+bool gTabPressed = false;
+bool gShiftPressed = false;
+float gShowPositionScale = 1.0f;
+float gShowDepthRange[2] = {10.0f, 20.f};
+bool gShowDepthPeseudoColor = true;
+float gCurrQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+float gPrevQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+
+inline unsigned char iclamp(int x) {
+  if (x > 255)
+    x = 255;
+  if (x < 0)
+    x = 0;
+  return (unsigned char)x;
 }
 
-inline float fclamp(float x)
-{
-    int i = x * 255.0f;
-    if (i > 255) i = 255;
-    if (i < 0) i = 0;
-    return (unsigned char)i;
+inline float fclamp(float x) {
+  int i = x * 255.0f;
+  if (i > 255)
+    i = 255;
+  if (i < 0)
+    i = 0;
+  return (unsigned char)i;
 }
 
-float blend(float src, float dst, float alpha)
-{
-    return alpha * src + (1.0f-alpha) * dst;
+float blend(float src, float dst, float alpha) {
+  return alpha * src + (1.0f - alpha) * dst;
 }
 
-void Display(SDL_Surface* surface, unsigned char* rgba, int width, int height)
-{
-    SDL_LockSurface(surface);
-
-    // BGRA?
-    unsigned char *data = (unsigned char *)surface->pixels;
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        float alpha = rgba[4*(y*width+x)+3] / 255.0f;
-        data[4*(y*width+x)+0] = fclamp(blend(rgba[4*(y*width+x)+2]/255.0f, data[4*(y*width+x)+0]/255.0f, alpha));
-        data[4*(y*width+x)+1] = fclamp(blend(rgba[4*(y*width+x)+1]/255.0f, data[4*(y*width+x)+1]/255.0f, alpha));
-        data[4*(y*width+x)+2] = fclamp(blend(rgba[4*(y*width+x)+0]/255.0f, data[4*(y*width+x)+2]/255.0f, alpha));
-        data[4*(y*width+x)+3] = 255;
-      }
+void Display(unsigned char *dst, unsigned char *rgba, int width, int height) {
+  // @todo { gamma correction. }
+  // BGRA?
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      float alpha = rgba[4 * (y * width + x) + 3] / 255.0f;
+      dst[4 * (y * width + x) + 0] =
+          fclamp(blend(rgba[4 * (y * width + x) + 2] / 255.0f,
+                       dst[4 * (y * width + x) + 0] / 255.0f, alpha));
+      dst[4 * (y * width + x) + 1] =
+          fclamp(blend(rgba[4 * (y * width + x) + 1] / 255.0f,
+                       dst[4 * (y * width + x) + 1] / 255.0f, alpha));
+      dst[4 * (y * width + x) + 2] =
+          fclamp(blend(rgba[4 * (y * width + x) + 0] / 255.0f,
+                       dst[4 * (y * width + x) + 2] / 255.0f, alpha));
+      dst[4 * (y * width + x) + 3] = 255;
     }
-
-
-    SDL_UnlockSurface(surface);
+  }
 }
 
-
+#if 0
 void DrawGUI(SDL_Window* window)
 {
     static bool show_test_window = true;
@@ -84,104 +100,204 @@ void DrawGUI(SDL_Window* window)
     }
     ImGui::Render();
 }
+#endif
 
-int main(int, char**)
-{
-    // Setup SDL
-	if (SDL_Init(SDL_INIT_VIDEO) != 0)
-	{
-        printf("Error: %s\n", SDL_GetError());
-        return -1;
-	}
+b3gDefaultWindow *window;
 
-    // Setup window
-	SDL_DisplayMode current;
-	SDL_GetCurrentDisplayMode(0, &current);
-	SDL_Window *window = SDL_CreateWindow("ImGui SDL2+RT example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 768, 768, SDL_WINDOW_RESIZABLE);
+void keyboardCallback(int keycode, int state) {
+  printf("hello key %d, state %d(ctrl %d)\n", keycode, state,
+         window->isModifierKeyPressed(B3G_CONTROL));
+  if (keycode == 27) {
+    if (window)
+      window->setRequestExit();
+  } else if (keycode == ' ') {
+    // trackball(gCurrQuat, 0.0f, 0.0f, 0.0f, 0.0f);
+  } else if (keycode == 9) {
+    gTabPressed = (state == 1);
+  } else if (keycode == B3G_SHIFT) {
+    gShiftPressed = (state == 1);
+  }
 
-    int width, height;
-    SDL_GetWindowSize(window, &width, &height);
-    
+  // ImGui_ImplRt_SetKeyState(keycode, (state == 1));
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
-    if (!renderer) {
-      printf("SDL err: %s\n", SDL_GetError());
-      exit(1);
+  if (keycode >= 32 && keycode <= 126) {
+    if (state == 1) {
+      // ImGui_ImplRt_SetChar(keycode);
+    }
+  }
+}
+
+void mouseMoveCallback(float x, float y) {
+
+  if (gMouseLeftDown) {
+    float w = gWidth;
+
+    float y_offset = gHeight;
+
+    if (gTabPressed) {
+      const float dolly_scale = 0.1;
+      // gRenderConfig.eye[2] += dolly_scale * (gMousePosY - y);
+      // gRenderConfig.look_at[2] += dolly_scale * (gMousePosY - y);
+    } else if (gShiftPressed) {
+      const float trans_scale = 0.02;
+      // gRenderConfig.eye[0] += trans_scale * (gMousePosX - x);
+      // gRenderConfig.eye[1] -= trans_scale * (gMousePosY - y);
+      // gRenderConfig.look_at[0] += trans_scale * (gMousePosX - x);
+      // gRenderConfig.look_at[1] -= trans_scale * (gMousePosY - y);
+
+    } else {
+      // Adjust y.
+      // trackball(gPrevQuat, (2.f * gMousePosX - w) / (float)w,
+      //          (h - 2.f * (gMousePosY - y_offset)) / (float)h, (2.f * x - w)
+      //          / (float)w,
+      //          (h - 2.f * (y - y_offset)) / (float)h);
+      // add_quats(gPrevQuat, gCurrQuat, gCurrQuat);
+    }
+    // RequestRender();
+  }
+
+  gMousePosX = (int)x;
+  gMousePosY = (int)y;
+}
+
+void mouseButtonCallback(int button, int state, float x, float y) {
+  // ImGui_ImplRt_SetMouseButtonState(button, (state == 1));
+
+  ImGuiIO &io = ImGui::GetIO();
+  if (io.WantCaptureMouse || io.WantCaptureKeyboard) {
+    return;
+  }
+
+  // left button
+  if (button == 0) {
+    if (state) {
+      gMouseLeftDown = true;
+      // trackball(gPrevQuat, 0.0f, 0.0f, 0.0f, 0.0f);
+    } else
+      gMouseLeftDown = false;
+  }
+}
+
+void resizeCallback(float width, float height) {
+  gWidth = width;
+  gHeight = height;
+}
+
+static void ClearFramebuffer(unsigned char *dst, int w, int h) {
+  float max_intensity = 0.3;
+  for (size_t y = 0; y < h; y++) {
+    float bg = static_cast<float>(y) / static_cast<float>(h);
+    bg *= max_intensity; // [0, max_intensity]
+    unsigned char blue = fclamp(bg);
+    for (size_t x = 0; x < w; x++) {
+      dst[4 * (y * w + x) + 0] = blue;
+      dst[4 * (y * w + x) + 1] = 0;
+      dst[4 * (y * w + x) + 2] = 0;
+      dst[4 * (y * w + x) + 3] = 0;
+    }
+  }
+}
+
+int main(int, char **) {
+  window = new b3gDefaultWindow;
+  b3gWindowConstructionInfo ci;
+  ci.m_width = 800;
+  ci.m_height = 600;
+  window->createWindow(ci);
+
+  window->setWindowTitle("view");
+
+  window->setMouseButtonCallback(mouseButtonCallback);
+  window->setMouseMoveCallback(mouseMoveCallback);
+  window->setKeyboardCallback(keyboardCallback);
+  window->setResizeCallback(resizeCallback);
+
+  ImGui_ImplRt_Init(window);
+
+  ImGuiIO &io = ImGui::GetIO();
+  io.Fonts->AddFontDefault();
+
+  std::vector<unsigned char> framebuffer(ci.m_width * ci.m_height * 4); // RGBA
+  ClearFramebuffer(framebuffer.data(), ci.m_width, ci.m_height);
+
+  while (!window->requestedExit()) {
+    window->startRendering();
+
+    ImGui_ImplRt_NewFrame(gMousePosX, gMousePosY);
+    ImGui::Begin("UI");
+    {
+      static float col[3] = {0, 0, 0};
+      static float f = 0.0f;
+      if (ImGui::ColorEdit3("color", col)) {
+        // RequestRender();
+      }
+      ImGui::InputFloat("intensity", &f);
+#if 0
+      if (ImGui::InputFloat3("eye", gRenderConfig.eye)) {
+        RequestRender();
+      }
+      if (ImGui::InputFloat3("up", gRenderConfig.up)) {
+        RequestRender();
+      }
+      if (ImGui::InputFloat3("look_at", gRenderConfig.look_at)) {
+        RequestRender();
+      }
+
+      ImGui::RadioButton("color", &gShowBufferMode, SHOW_BUFFER_COLOR);
+      ImGui::SameLine();
+      ImGui::RadioButton("normal", &gShowBufferMode, SHOW_BUFFER_NORMAL);
+      ImGui::SameLine();
+      ImGui::RadioButton("position", &gShowBufferMode, SHOW_BUFFER_POSITION);
+      ImGui::SameLine();
+      ImGui::RadioButton("depth", &gShowBufferMode, SHOW_BUFFER_DEPTH);
+      ImGui::SameLine();
+      ImGui::RadioButton("texcoord", &gShowBufferMode, SHOW_BUFFER_TEXCOORD);
+      ImGui::SameLine();
+      ImGui::RadioButton("varycoord", &gShowBufferMode, SHOW_BUFFER_VARYCOORD);
+
+      ImGui::InputFloat("show pos scale", &gShowPositionScale);
+
+      ImGui::InputFloat2("show depth range", gShowDepthRange);
+      ImGui::Checkbox("show depth pesudo color", &gShowDepthPeseudoColor);
+#endif
     }
 
-    SDL_Surface* surface = SDL_GetWindowSurface(window);
-    if (!surface) {
-      printf("SDL err: %s\n", SDL_GetError());
-      exit(1);
-    }
+    ImGui::End();
 
+    // glViewport(0, 0, window->getWidth(), window->getHeight());
+    // glClearColor(0, 0.1, 0.2f, 1.0f);
+    // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+    // GL_STENCIL_BUFFER_BIT);
 
+    // checkErrors("clear");
 
-    // Setup ImGui binding
-    ImGui_ImplRt_Init(window);
-    printf("done init\n");
+    // Display(gRenderConfig.width, gRenderConfig.height);
 
-    // Load Fonts
-    // (see extra_fonts/README.txt for more details)
-    //ImGuiIO& io = ImGui::GetIO();
-    //io.Fonts->AddFontDefault();
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/Cousine-Regular.ttf", 15.0f);
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/DroidSans.ttf", 16.0f);
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/ProggyClean.ttf", 13.0f);
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/ProggyTiny.ttf", 10.0f);
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese());
+    ImGui::Render();
 
-    // Merge glyphs from multiple fonts into one (e.g. combine default font with another with Chinese glyphs, or add icons)
-    //ImWchar icons_ranges[] = { 0xf000, 0xf3ff, 0 };
-    //ImFontConfig icons_config; icons_config.MergeMode = true; icons_config.PixelSnapH = true;
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/DroidSans.ttf", 18.0f);
-    //io.Fonts->AddFontFromFileTTF("../../extra_fonts/fontawesome-webfont.ttf", 18.0f, &icons_config, icons_ranges);
-
-    std::vector<unsigned char> image(width * height * 4);
-
-    SDL_SetRenderDrawColor(renderer, 114, 144, 154, 255);
-    SDL_RenderClear(renderer);
-    DrawGUI(window);
+    // Composite
+    std::vector<unsigned char> image(window->getWidth() * window->getHeight() *
+                                     4);
     ImGui_ImplRt_GetImage(&image.at(0));
 
-    // Main loop
-	bool done = false;
-    while (!done)
-    {
-        SDL_Event event;
-        bool updateGUI = false;
-        while (SDL_PollEvent(&event))
-        {
-            if (ImGui_ImplRt_ProcessEvent(&event)) {
-                updateGUI = true;
-                
-                if (event.type == SDL_QUIT) {
-                    done = true;
-                    break;
-                }
+    assert(ci.m_width == window->getWidth());
+    assert(ci.m_height == window->getHeight());
+    ClearFramebuffer(framebuffer.data(), ci.m_width, ci.m_height);
+    Display(framebuffer.data(), image.data(), window->getWidth(),
+            window->getHeight());
 
-            }
-        }
+    window->updateImage(framebuffer.data(), window->getWidth(),
+                        window->getHeight());
 
-        SDL_SetRenderDrawColor(renderer, 114, 144, 154, 255);
-        SDL_RenderClear(renderer);
+    window->endRendering();
 
-        if (updateGUI) {
-            DrawGUI(window);
-            ImGui_ImplRt_GetImage(&image.at(0));
-        }
+    // Give some cycles to this thread.
+    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+  }
 
-        Display(surface, &image.at(0), width, height);
-        SDL_RenderPresent(renderer); // bitblit
+  ImGui_ImplRt_Shutdown();
+  window->closeWindow();
+  delete window;
 
-        SDL_Delay(33);
-    }
-
-    // Cleanup
-    ImGui_ImplRt_Shutdown();
-
-	SDL_DestroyWindow(window);
-	SDL_Quit();
-
-    return 0;
+  return EXIT_SUCCESS;
 }
