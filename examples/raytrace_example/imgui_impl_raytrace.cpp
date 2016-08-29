@@ -9,6 +9,10 @@
 #define NANORT_IMPLEMENTATION
 #include "nanort.h"
 
+#define IMGUI_B3G_CONTROL (300)
+#define IMGUI_B3G_SHIFT (301)
+#define IMGUI_B3G_ALT (301)
+
 // Data
 static b3gDefaultWindow *g_Window = NULL;
 static double g_Time = 0.0f;
@@ -753,4 +757,61 @@ void ImGui_ImplRt_NewFrame(int mouse_x, int mouse_y) {
 
 void ImGui_ImplRt_GetImage(unsigned char *dst_image) {
   memcpy(dst_image, &g_buffer.at(0), g_buffer.size());
+}
+
+void ImGui_ImplRt_SetMouseButtonState(int button, bool pressed) {
+  if (button >= 0 && button < 3) {
+    g_MousePressed[button] = pressed;
+  }
+}
+
+void ImGui_ImplRt_SetKeyState(int key, bool pressed) {
+  ImGuiIO &io = ImGui::GetIO();
+
+  // Remap keycode manually here.
+  if (key == B3G_RETURN) {
+    key = ImGuiKey_Enter;
+  } else if ((key == B3G_BACKSPACE) || (key == 8)) {
+    key = ImGuiKey_Backspace;
+  } else if (key == 9) {
+    key = ImGuiKey_Tab;
+  } else if (key == B3G_DELETE) {
+    key = ImGuiKey_Delete;
+  } else if (key == B3G_END) {
+    key = ImGuiKey_End;
+  } else if (key == B3G_HOME) {
+    key = ImGuiKey_Home;
+  } else if (key == B3G_LEFT_ARROW) {
+    key = ImGuiKey_LeftArrow;
+  } else if (key == B3G_RIGHT_ARROW) {
+    key = ImGuiKey_RightArrow;
+  } else if (key == B3G_UP_ARROW) {
+    key = ImGuiKey_UpArrow;
+  } else if (key == B3G_DOWN_ARROW) {
+    key = ImGuiKey_DownArrow;
+  } else if (key == B3G_ESCAPE) {
+    key = ImGuiKey_Escape;
+  } else if (key == B3G_CONTROL) {
+    key = IMGUI_B3G_CONTROL;
+  } else if (key == B3G_ALT) {
+    key = IMGUI_B3G_ALT;
+  } else if (key == B3G_SHIFT) {
+    key = IMGUI_B3G_SHIFT;
+  }
+
+  if (key >= 0 && key < 512) {
+    io.KeysDown[key] = pressed;
+  }
+
+  io.KeyCtrl = io.KeysDown[IMGUI_B3G_CONTROL];
+  io.KeyShift = io.KeysDown[IMGUI_B3G_SHIFT];
+  io.KeyAlt = io.KeysDown[IMGUI_B3G_ALT];
+  // io.KeySuper = io.KeysDown[GLFW_KEY_LEFT_SUPER] ||
+  // io.KeysDown[GLFW_KEY_RIGHT_SUPER]; // @todo
+}
+
+void ImGui_ImplRt_SetChar(int c) {
+  ImGuiIO &io = ImGui::GetIO();
+  if (c > 0 && c < 0x10000)
+    io.AddInputCharacter((unsigned short)c);
 }

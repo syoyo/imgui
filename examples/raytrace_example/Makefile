@@ -12,7 +12,7 @@ DEPS := $(OBJS:.o=.d)
 INC_DIRS := $(shell find $(SRC_DIRS) -type d)
 INC_FLAGS := $(addprefix -I,$(INC_DIRS)) -I../../
 
-CPPFLAGS ?= $(INC_FLAGS) -std=c++11 -MMD -MP
+CPPFLAGS ?= $(INC_FLAGS) -std=c++11 -O3 -MMD -MP
 
 LDFLAGS += -L/usr/X11/lib -lX11
 

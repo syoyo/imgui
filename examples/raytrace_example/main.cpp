@@ -3,11 +3,12 @@
 
 #include "imgui_impl_raytrace.h"
 #include <imgui.h>
+//#include "../../imgui_demo.h"
 #include <stdio.h>
 #include <vector>
 
-#include <atomic>
-#include <thread>
+//#include <atomic>
+#include <thread> // C++11
 
 int gWidth = 512;
 int gHeight = 512;
@@ -20,6 +21,8 @@ float gShowDepthRange[2] = {10.0f, 20.f};
 bool gShowDepthPeseudoColor = true;
 float gCurrQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 float gPrevQuat[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+
+float gBackgroundColor[3] = {0.0f, 0.0f, 0.25f};
 
 inline unsigned char iclamp(int x) {
   if (x > 255)
@@ -118,11 +121,11 @@ void keyboardCallback(int keycode, int state) {
     gShiftPressed = (state == 1);
   }
 
-  // ImGui_ImplRt_SetKeyState(keycode, (state == 1));
+  ImGui_ImplRt_SetKeyState(keycode, (state == 1));
 
   if (keycode >= 32 && keycode <= 126) {
     if (state == 1) {
-      // ImGui_ImplRt_SetChar(keycode);
+      ImGui_ImplRt_SetChar(keycode);
     }
   }
 }
@@ -161,7 +164,7 @@ void mouseMoveCallback(float x, float y) {
 }
 
 void mouseButtonCallback(int button, int state, float x, float y) {
-  // ImGui_ImplRt_SetMouseButtonState(button, (state == 1));
+  ImGui_ImplRt_SetMouseButtonState(button, (state == 1));
 
   ImGuiIO &io = ImGui::GetIO();
   if (io.WantCaptureMouse || io.WantCaptureKeyboard) {
@@ -186,13 +189,14 @@ void resizeCallback(float width, float height) {
 static void ClearFramebuffer(unsigned char *dst, int w, int h) {
   float max_intensity = 0.3;
   for (size_t y = 0; y < h; y++) {
-    float bg = static_cast<float>(y) / static_cast<float>(h);
-    bg *= max_intensity; // [0, max_intensity]
-    unsigned char blue = fclamp(bg);
+    float a = static_cast<float>(y) / static_cast<float>(h);
+    float red = a * gBackgroundColor[0];
+    float green = a * gBackgroundColor[1];
+    float blue = a * gBackgroundColor[2];
     for (size_t x = 0; x < w; x++) {
-      dst[4 * (y * w + x) + 0] = blue;
-      dst[4 * (y * w + x) + 1] = 0;
-      dst[4 * (y * w + x) + 2] = 0;
+      dst[4 * (y * w + x) + 0] = fclamp(blue);
+      dst[4 * (y * w + x) + 1] = fclamp(green);
+      dst[4 * (y * w + x) + 2] = fclamp(red);
       dst[4 * (y * w + x) + 3] = 0;
     }
   }
@@ -226,12 +230,13 @@ int main(int, char **) {
     ImGui_ImplRt_NewFrame(gMousePosX, gMousePosY);
     ImGui::Begin("UI");
     {
-      static float col[3] = {0, 0, 0};
       static float f = 0.0f;
-      if (ImGui::ColorEdit3("color", col)) {
+      static float b = 0.0f;
+      if (ImGui::ColorEdit3("color", gBackgroundColor)) {
         // RequestRender();
       }
       ImGui::InputFloat("intensity", &f);
+      ImGui::SliderFloat("bora", &b, 0.0f, 1.0f);
 #if 0
       if (ImGui::InputFloat3("eye", gRenderConfig.eye)) {
         RequestRender();
@@ -264,30 +269,23 @@ int main(int, char **) {
 
     ImGui::End();
 
-    // glViewport(0, 0, window->getWidth(), window->getHeight());
-    // glClearColor(0, 0.1, 0.2f, 1.0f);
-    // glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
-    // GL_STENCIL_BUFFER_BIT);
-
-    // checkErrors("clear");
-
-    // Display(gRenderConfig.width, gRenderConfig.height);
-
     ImGui::Render();
 
     // Composite
-    std::vector<unsigned char> image(window->getWidth() * window->getHeight() *
-                                     4);
-    ImGui_ImplRt_GetImage(&image.at(0));
+    {
+      std::vector<unsigned char> image(window->getWidth() *
+                                       window->getHeight() * 4);
+      ImGui_ImplRt_GetImage(&image.at(0));
 
-    assert(ci.m_width == window->getWidth());
-    assert(ci.m_height == window->getHeight());
-    ClearFramebuffer(framebuffer.data(), ci.m_width, ci.m_height);
-    Display(framebuffer.data(), image.data(), window->getWidth(),
-            window->getHeight());
+      assert(ci.m_width == window->getWidth());
+      assert(ci.m_height == window->getHeight());
+      ClearFramebuffer(framebuffer.data(), ci.m_width, ci.m_height);
+      Display(framebuffer.data(), image.data(), window->getWidth(),
+              window->getHeight());
 
-    window->updateImage(framebuffer.data(), window->getWidth(),
-                        window->getHeight());
+      window->updateImage(framebuffer.data(), window->getWidth(),
+                          window->getHeight());
+    }
 
     window->endRendering();
 
